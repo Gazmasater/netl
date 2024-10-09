@@ -1,0 +1,39 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"os/user"
+
+	"github.com/vishvananda/netlink"
+)
+
+func main() {
+	handle, err := netlink.NewHandle()
+	if err != nil {
+		log.Fatalf("Error creating handle: %v", err)
+	}
+	defer handle.Close()
+
+	sockets, err := handle.SocketDiagTCPInfo(netlink.FAMILY_V4)
+	if err != nil {
+		log.Fatalf("Error getting socket list: %v", err)
+	}
+
+	for _, socket := range sockets {
+		localAddr := socket.InetDiagMsg.ID.Source
+		destAddr := socket.InetDiagMsg.ID.Destination
+
+		uid := socket.InetDiagMsg.UID
+		user, err := user.LookupId(fmt.Sprint(uid))
+		if err != nil {
+			fmt.Printf("User ID %d: error getting username: %v\n", uid, err)
+		} else {
+			fmt.Printf("User: %s\n", user.Username)
+		}
+
+		fmt.Printf("Local Address: %s:%d\n", localAddr.String(), socket.InetDiagMsg.ID.SourcePort)
+		fmt.Printf("Destination: %s:%d\n", destAddr.String(), socket.InetDiagMsg.ID.DestinationPort)
+		fmt.Println()
+	}
+}
