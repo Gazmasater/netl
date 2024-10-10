@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os/user"
+	"strconv"
 
 	"github.com/vishvananda/netlink"
 )
@@ -15,7 +16,6 @@ func main() {
 	}
 	defer handle.Close()
 
-	// Получаем TCP сокеты
 	sockets, err := handle.SocketDiagTCPInfo(netlink.FAMILY_V4)
 	if err != nil {
 		log.Fatalf("Error getting socket list: %v", err)
@@ -31,18 +31,24 @@ func main() {
 			log.Printf("Error looking up user: %v", err)
 		}
 
-		// Проверяем, является ли сокет активным (например, ESTABLISHED)
-		if socket.InetDiagMsg.State == netlink.TCP_LISTEN {
-			fmt.Printf("Local Address: %s:%d\n", localAddr.String(), socket.InetDiagMsg.ID.SourcePort)
-			fmt.Printf("Destination: %s:%d\n", destAddr.String(), socket.InetDiagMsg.ID.DestinationPort)
+		inode := strconv.Itoa(int(socket.InetDiagMsg.INode))
+		UserID := socket.InetDiagMsg.UID
 
-			if userInfo != nil {
-				fmt.Printf("User: %s\n", userInfo.Username)
-			} else {
-				fmt.Println("User: Unknown")
-			}
+		fmt.Printf("Local Address: %s:%d\n", localAddr.String(), socket.InetDiagMsg.ID.SourcePort)
+		fmt.Printf("Destination: %s:%d\n", destAddr.String(), socket.InetDiagMsg.ID.DestinationPort)
+		fmt.Printf("INode: %s\n", inode)
+		fmt.Println("State:", socket.InetDiagMsg.State)
+		// Вывод размера очереди получения
+		fmt.Printf("Receive Queue (RQueue): %d\n", socket.InetDiagMsg.RQueue) // Количество байтов в очереди получения
+		fmt.Printf("Send Queue (WQueue): %d\n", socket.InetDiagMsg.WQueue)    // Количество байтов в очереди отправки
 
-			fmt.Println() // Добавляет пустую строку между сокетами для удобства
+		if userInfo != nil {
+			fmt.Printf("UserID: %d\n", UserID)
+			fmt.Printf("User: %s\n", userInfo.Username)
+		} else {
+			fmt.Println("User: Unknown")
 		}
+
+		fmt.Println()
 	}
 }
