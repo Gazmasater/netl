@@ -3,52 +3,68 @@ package main
 import (
 	"fmt"
 	"log"
-	"os/user"
-	"strconv"
+	"syscall"
 
-	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
+)
+
+// Определяем состояния TCP вручную
+const (
+	TCP_ESTABLISHED     = 1
+	TCP_SYN_SENT        = 2
+	TCP_SYN_RECV        = 3
+	TCP_FIN_WAIT1       = 4
+	TCP_FIN_WAIT2       = 5
+	TCP_TIME_WAIT       = 6
+	TCP_CLOSE           = 7
+	TCP_CLOSE_WAIT      = 8
+	TCP_LAST_ACK        = 9
+	TCP_LISTEN          = 10
+	TCP_CLOSING         = 11
+	SOCK_DIAG_BY_FAMILY = 4 // Определяем SOCK_DIAG_BY_FAMILY вручную
 )
 
 func main() {
-	handle, err := netlink.NewHandle()
+	// Создаем netlink-сокет для SOCK_DIAG
+	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_SOCK_DIAG)
 	if err != nil {
-		log.Fatalf("Error creating handle: %v", err)
+		log.Fatalf("Error creating netlink socket: %v", err)
 	}
-	defer handle.Close()
+	defer unix.Close(fd)
 
-	sockets, err := handle.SocketDiagTCPInfo(netlink.FAMILY_V4)
-	if err != nil {
-		log.Fatalf("Error getting socket list: %v", err)
+	// Подготавливаем адрес для подписки на события TCP
+	saddr := &unix.SockaddrNetlink{
+		Family: unix.AF_NETLINK,
+		Groups: unix.NETLINK_SOCK_DIAG,
 	}
 
-	for _, socket := range sockets {
-		localAddr := socket.InetDiagMsg.ID.Source
-		destAddr := socket.InetDiagMsg.ID.Destination
+	// Привязываем сокет к адресу
+	if err := unix.Bind(fd, saddr); err != nil {
+		log.Fatalf("Error binding netlink socket: %v", err)
+	}
 
-		uid := socket.InetDiagMsg.UID
-		userInfo, err := user.LookupId(fmt.Sprintf("%d", uid))
+	log.Println("Netlink socket successfully created and bound. Listening for socket events...")
+
+	// Бесконечный цикл для получения сообщений
+	for {
+		buf := make([]byte, 4096)
+
+		n, _, err := unix.Recvfrom(fd, buf, 0)
 		if err != nil {
-			log.Printf("Error looking up user: %v", err)
+			log.Fatalf("Error receiving from netlink socket: %v", err)
 		}
 
-		inode := strconv.Itoa(int(socket.InetDiagMsg.INode))
-		UserID := socket.InetDiagMsg.UID
-
-		fmt.Printf("Local Address: %s:%d\n", localAddr.String(), socket.InetDiagMsg.ID.SourcePort)
-		fmt.Printf("Destination: %s:%d\n", destAddr.String(), socket.InetDiagMsg.ID.DestinationPort)
-		fmt.Printf("INode: %s\n", inode)
-		fmt.Println("State:", socket.InetDiagMsg.State)
-		// Вывод размера очереди получения
-		fmt.Printf("Receive Queue (RQueue): %d\n", socket.InetDiagMsg.RQueue) // Количество байтов в очереди получения
-		fmt.Printf("Send Queue (WQueue): %d\n", socket.InetDiagMsg.WQueue)    // Количество байтов в очереди отправки
-
-		if userInfo != nil {
-			fmt.Printf("UserID: %d\n", UserID)
-			fmt.Printf("User: %s\n", userInfo.Username)
-		} else {
-			fmt.Println("User: Unknown")
+		// Разбираем полученные данные
+		msgs, err := syscall.ParseNetlinkMessage(buf[:n])
+		if err != nil {
+			log.Fatalf("Error parsing netlink message: %v", err)
 		}
 
-		fmt.Println()
+		// Обрабатываем каждое сообщение
+		for _, msg := range msgs {
+
+			// Просто выводим тип сообщения
+			fmt.Printf("Received netlink message type: %d\n", msg.Header.Type)
+		}
 	}
 }
